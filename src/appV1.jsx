@@ -36,7 +36,7 @@ const db = {
 };
 
 // ─── Auth (senha local simples) ────────────────────────────────────────────
-const APP_PASSWORD = "cgf2025"; // ← altere aqui se quiser mudar a senha
+const APP_PASSWORD = "241441"; // ← altere aqui se quiser mudar a senha
 const isAuthed = () => sessionStorage.getItem("cgf_auth") === "ok";
 const setAuthed = () => sessionStorage.setItem("cgf_auth", "ok");
 const clearAuthed = () => sessionStorage.removeItem("cgf_auth");
@@ -85,25 +85,6 @@ function LoginScreen({ onLogin }) {
 
 // ─── App Root ──────────────────────────────────────────────────────────────
 export default function App() {
-  // Inject responsive CSS once
-  useEffect(() => {
-    const id = "cgf-responsive";
-    if(!document.getElementById(id)) {
-      const s = document.createElement("style");
-      s.id = id;
-      s.textContent = `
-        @media (max-width: 860px) {
-          .cgf-logo-title { font-size: 13px !important; }
-          .cgf-logo-sub { display: none !important; }
-          .cgf-env-label { display: none !important; }
-        }
-        @media (max-width: 600px) {
-          .cgf-logo-title { display: none !important; }
-        }
-      `;
-      document.head.appendChild(s);
-    }
-  }, []);
   const [authed, setAuthedState] = useState(isAuthed());
   const [env, setEnv] = useState("casa");
   const [screen, setScreen] = useState("dashboard");
@@ -162,8 +143,8 @@ export default function App() {
           <div style={S.logoWrap}>
             <span style={S.logoIcon}>📊</span>
             <div>
-              <div style={S.logoTitle} className="cgf-logo-title">Controle de Gestão Financeira</div>
-              <div style={S.logoSub} className="cgf-logo-sub">Sistema Integrado de Finanças Pessoais</div>
+              <div style={S.logoTitle}>Controle de Gestão Financeira</div>
+              <div style={S.logoSub}>Sistema Integrado de Finanças Pessoais</div>
             </div>
           </div>
         </div>
@@ -177,8 +158,7 @@ export default function App() {
             {["casa","escritorio"].map(e=>(
               <button key={e} style={{...S.envBtn,...(env===e?S.envBtnActive:{})}}
                 onClick={()=>{setEnv(e);setScreen("dashboard");}}>
-                <span>{e==="casa"?"🏠":"💼"}</span>
-                <span className="cgf-env-label">{e==="casa"?" Casa":" Escritório"}</span>
+                {e==="casa"?"🏠 Casa":"💼 Escritório"}
               </button>
             ))}
           </div>
@@ -510,11 +490,11 @@ function Launch({ categories, transactions, setTransactions, env, showToast }) {
         </div>
       </div>
 
-      <h3 style={S.sectionTitle}>Lançamentos ({[...transactions].filter(t=>t.env===env).length} no total)</h3>
+      <h3 style={S.sectionTitle}>Últimos Lançamentos</h3>
       <table style={S.table}>
         <thead><tr><th style={S.th}>Vencimento</th><th style={S.th}>Descrição</th><th style={S.th}>Categoria</th><th style={S.th}>Valor</th><th style={S.th}>Status</th><th style={S.th}>Ações</th></tr></thead>
         <tbody>
-          {[...transactions].filter(t=>t.env===env).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(t=>(
+          {[...transactions].filter(t=>t.env===env).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).slice(0,40).map(t=>(
             <tr key={t.id} style={S.tr}>
               <td style={S.td}>{fmtDate(t.dueDate)}</td>
               <td style={S.td}>{t.description}</td>
@@ -953,8 +933,8 @@ const S = {
   logoIcon: { fontSize:28 },
   logoTitle: { fontSize:17, fontWeight:800, color:"#1e3a5f", letterSpacing:-0.3 },
   logoSub: { fontSize:11, color:"#64748b", letterSpacing:0.3 },
-  envToggle: { display:"flex", gap:4 },
-  envBtn: { background:"#f0f9ff", border:"1px solid #bfdbfe", color:"#3b82f6", padding:"6px 10px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", maxWidth:120 },
+  envToggle: { display:"flex", gap:6 },
+  envBtn: { background:"#f0f9ff", border:"1px solid #bfdbfe", color:"#3b82f6", padding:"6px 14px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 },
   envBtnActive: { background:"#2563eb", border:"1px solid #2563eb", color:"#fff" },
   btnLogout: { background:"transparent", border:"1px solid #bfdbfe", color:"#64748b", padding:"6px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600 },
   alertBell: { position:"relative", fontSize:20, cursor:"pointer" },

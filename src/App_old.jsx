@@ -5,16 +5,15 @@ const SUPABASE_URL = "https://vwgumwnpgbybcocpzygq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Z3Vtd25wZ2J5YmNvY3B6eWdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0ODI3NzYsImV4cCI6MjA5MTA1ODc3Nn0.7JeR226bGW9mGvbKUeboFNcmwp4NA9SF4DdRJDxD11k";
 
 const sb = async (path, opts = {}) => {
-  const { headers: extraHeaders, prefer, ...rest } = opts;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: prefer !== undefined ? prefer : "return=representation",
-      ...extraHeaders,
+      Prefer: opts.prefer || "return=representation",
+      ...opts.headers,
     },
-    ...rest,
+    ...opts,
   });
   if (!res.ok) throw new Error(await res.text());
   const text = await res.text();
@@ -23,8 +22,7 @@ const sb = async (path, opts = {}) => {
 
 const db = {
   getCategories: () => sb("categories?order=code"),
-  insertCategory: (cat) => sb("categories", { method: "POST", body: JSON.stringify(cat) }),
-  updateCategory: (id, data) => sb(`categories?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  upsertCategory: (cat) => sb("categories", { method: "POST", body: JSON.stringify(cat), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }),
   deleteCategory: (id) => sb(`categories?id=eq.${id}`, { method: "DELETE", prefer: "" }),
   getTransactions: () => sb("transactions?order=due_date.desc"),
   insertTransactions: (txs) => sb("transactions", { method: "POST", body: JSON.stringify(txs) }),
@@ -36,7 +34,7 @@ const db = {
 };
 
 // ─── Auth (senha local simples) ────────────────────────────────────────────
-const APP_PASSWORD = "cgf2025"; // ← altere aqui se quiser mudar a senha
+const APP_PASSWORD = "241441"; // ← altere aqui se quiser mudar a senha
 const isAuthed = () => sessionStorage.getItem("cgf_auth") === "ok";
 const setAuthed = () => sessionStorage.setItem("cgf_auth", "ok");
 const clearAuthed = () => sessionStorage.removeItem("cgf_auth");
@@ -85,25 +83,6 @@ function LoginScreen({ onLogin }) {
 
 // ─── App Root ──────────────────────────────────────────────────────────────
 export default function App() {
-  // Inject responsive CSS once
-  useEffect(() => {
-    const id = "cgf-responsive";
-    if(!document.getElementById(id)) {
-      const s = document.createElement("style");
-      s.id = id;
-      s.textContent = `
-        @media (max-width: 860px) {
-          .cgf-logo-title { font-size: 13px !important; }
-          .cgf-logo-sub { display: none !important; }
-          .cgf-env-label { display: none !important; }
-        }
-        @media (max-width: 600px) {
-          .cgf-logo-title { display: none !important; }
-        }
-      `;
-      document.head.appendChild(s);
-    }
-  }, []);
   const [authed, setAuthedState] = useState(isAuthed());
   const [env, setEnv] = useState("casa");
   const [screen, setScreen] = useState("dashboard");
@@ -162,8 +141,8 @@ export default function App() {
           <div style={S.logoWrap}>
             <span style={S.logoIcon}>📊</span>
             <div>
-              <div style={S.logoTitle} className="cgf-logo-title">Controle de Gestão Financeira</div>
-              <div style={S.logoSub} className="cgf-logo-sub">Sistema Integrado de Finanças Pessoais</div>
+              <div style={S.logoTitle}>Controle de Gestão Financeira</div>
+              <div style={S.logoSub}>Sistema Integrado de Finanças Pessoais</div>
             </div>
           </div>
         </div>
@@ -177,8 +156,7 @@ export default function App() {
             {["casa","escritorio"].map(e=>(
               <button key={e} style={{...S.envBtn,...(env===e?S.envBtnActive:{})}}
                 onClick={()=>{setEnv(e);setScreen("dashboard");}}>
-                <span>{e==="casa"?"🏠":"💼"}</span>
-                <span className="cgf-env-label">{e==="casa"?" Casa":" Escritório"}</span>
+                {e==="casa"?"🏠 Casa":"💼 Escritório"}
               </button>
             ))}
           </div>
@@ -345,21 +323,13 @@ function Categories({ categories, setCategories, env, showToast }) {
     if(!form.code||!form.name){showToast("Preencha código e nome.","error");return;}
     setSaving(true);
     try {
-      const record = {code:form.code,name:form.name,type:form.type,env:form.env};
-      if(editing) {
-        await db.updateCategory(editing, record);
-        const updated = {...record, id: editing};
-        setCategories(cs=>cs.map(c=>c.id===editing?mapCat(updated):c));
-        showToast("Categoria atualizada.");
-      } else {
-        const newRecord = {...record, id: form.code};
-        const inserted = await db.insertCategory(newRecord);
-        const cat = Array.isArray(inserted) ? inserted[0] : inserted;
-        setCategories(cs=>[...cs, mapCat(cat||newRecord)].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})));
-        showToast("Categoria criada.");
-      }
+      const record = {id:editing||form.code,code:form.code,name:form.name,type:form.type,env:form.env};
+      await db.upsertCategory(record);
+      if(editing) setCategories(cs=>cs.map(c=>c.id===editing?mapCat(record):c));
+      else setCategories(cs=>[...cs,mapCat(record)].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})));
+      showToast(editing?"Categoria atualizada.":"Categoria criada.");
       setForm(empty);setEditing(null);
-    } catch(e) { showToast("Erro ao salvar: "+e.message,"error"); }
+    } catch { showToast("Erro ao salvar.","error"); }
     setSaving(false);
   };
 
@@ -410,25 +380,9 @@ function Categories({ categories, setCategories, env, showToast }) {
 }
 
 // ─── Launch ────────────────────────────────────────────────────────────────
-// Helper: add N months keeping last-day-of-month logic (30/jan → 28/fev, not 03/mar)
-function addMonthsSafe(isoDate, n) {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  const targetMonth = m - 1 + n; // 0-based
-  const newYear = y + Math.floor(targetMonth / 12);
-  const newMonth = ((targetMonth % 12) + 12) % 12; // 0-based
-  const lastDay = new Date(newYear, newMonth + 1, 0).getDate();
-  const newDay = Math.min(d, lastDay);
-  return `${newYear}-${String(newMonth + 1).padStart(2,"0")}-${String(newDay).padStart(2,"0")}`;
-}
-
 function Launch({ categories, transactions, setTransactions, env, showToast }) {
-  const emptyForm = {description:"",categoryId:"",dueDate:nowISO(),plannedValue:"",recurring:false,recurMonths:1};
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({description:"",categoryId:"",dueDate:nowISO(),plannedValue:"",recurring:false,recurMonths:1});
   const [saving, setSaving] = useState(false);
-  const [editingTx, setEditingTx] = useState(null);
-  const [editForm, setEditForm] = useState({description:"",categoryId:"",dueDate:"",plannedValue:""});
-  const [confirmDelete, setConfirmDelete] = useState(null);
-
   const validCats = categories.filter(c=>c.type!=="title"&&(c.env==="both"||c.env===env)).sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));
 
   const handleSave = async () => {
@@ -439,42 +393,15 @@ function Launch({ categories, transactions, setTransactions, env, showToast }) {
       const months = form.recurring?parseInt(form.recurMonths)||1:1;
       const recurGroup = form.recurring?uid():null;
       const newTxs = Array.from({length:months},(_,i)=>{
-        const dueDate = addMonthsSafe(form.dueDate, i);
-        return {id:uid(),description:form.description,category_id:form.categoryId,env,due_date:dueDate,planned_value:val,settled:false,settled_date:null,settled_value:0,recur_group:recurGroup};
+        const d = new Date(form.dueDate+"T12:00:00"); d.setMonth(d.getMonth()+i);
+        return {id:uid(),description:form.description,category_id:form.categoryId,env,due_date:d.toISOString().slice(0,10),planned_value:val,settled:false,settled_date:null,settled_value:0,recur_group:recurGroup};
       });
       const inserted = await db.insertTransactions(newTxs);
       setTransactions(ts=>[...ts,...inserted.map(mapTx)]);
       showToast(`${months} lançamento(s) criado(s)!`);
-      setForm(emptyForm);
-    } catch(e) { showToast("Erro ao salvar: "+e.message,"error"); }
+      setForm({description:"",categoryId:"",dueDate:nowISO(),plannedValue:"",recurring:false,recurMonths:1});
+    } catch { showToast("Erro ao salvar.","error"); }
     setSaving(false);
-  };
-
-  const startEdit = (t) => {
-    setEditingTx(t);
-    setEditForm({description:t.description,categoryId:t.categoryId,dueDate:t.dueDate,plannedValue:fmtCurrency(t.plannedValue)});
-  };
-
-  const confirmEdit = async () => {
-    if(!editForm.description||!editForm.categoryId||!editForm.dueDate||!editForm.plannedValue){showToast("Preencha todos os campos.","error");return;}
-    setSaving(true);
-    try {
-      const val = parseCurrency(editForm.plannedValue);
-      await db.updateTransaction(editingTx.id,{description:editForm.description,category_id:editForm.categoryId,due_date:editForm.dueDate,planned_value:val});
-      setTransactions(ts=>ts.map(t=>t.id===editingTx.id?{...t,description:editForm.description,categoryId:editForm.categoryId,dueDate:editForm.dueDate,plannedValue:val}:t));
-      showToast("Lançamento atualizado!");
-      setEditingTx(null);
-    } catch(e) { showToast("Erro ao editar: "+e.message,"error"); }
-    setSaving(false);
-  };
-
-  const handleDelete = async (t) => {
-    try {
-      await db.deleteTransaction(t.id);
-      setTransactions(ts=>ts.filter(x=>x.id!==t.id));
-      showToast("Lançamento excluído.");
-      setConfirmDelete(null);
-    } catch(e) { showToast("Erro ao excluir: "+e.message,"error"); }
   };
 
   return (
@@ -502,72 +429,28 @@ function Launch({ categories, transactions, setTransactions, env, showToast }) {
         {form.recurring && (
           <div style={{...S.card,background:"#eff6ff",marginTop:4}}>
             <Field label="Repetir por quantos meses?" type="number" value={form.recurMonths} onChange={v=>setForm(f=>({...f,recurMonths:v}))} placeholder="1" />
-            <p style={{color:"#3b82f6",fontSize:12,marginTop:4}}>Serão criados {form.recurMonths||1} lançamentos. Datas com dia 29/30/31 serão ajustadas ao último dia do mês.</p>
+            <p style={{color:"#3b82f6",fontSize:12,marginTop:4}}>Serão criados {form.recurMonths||1} lançamentos a partir da data informada.</p>
           </div>
         )}
         <div style={S.btnRow}>
           <button style={S.btnPrimary} onClick={handleSave} disabled={saving}>{saving?"Salvando...":"Lançar"}</button>
         </div>
       </div>
-
-      <h3 style={S.sectionTitle}>Lançamentos ({[...transactions].filter(t=>t.env===env).length} no total)</h3>
+      <h3 style={S.sectionTitle}>Últimos Lançamentos</h3>
       <table style={S.table}>
-        <thead><tr><th style={S.th}>Vencimento</th><th style={S.th}>Descrição</th><th style={S.th}>Categoria</th><th style={S.th}>Valor</th><th style={S.th}>Status</th><th style={S.th}>Ações</th></tr></thead>
+        <thead><tr><th style={S.th}>Vencimento</th><th style={S.th}>Descrição</th><th style={S.th}>Categoria</th><th style={S.th}>Valor</th><th style={S.th}>Status</th></tr></thead>
         <tbody>
-          {[...transactions].filter(t=>t.env===env).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(t=>(
+          {[...transactions].filter(t=>t.env===env).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).slice(0,25).map(t=>(
             <tr key={t.id} style={S.tr}>
               <td style={S.td}>{fmtDate(t.dueDate)}</td>
               <td style={S.td}>{t.description}</td>
               <td style={S.td}>{getCatName(t.categoryId,categories)}</td>
               <td style={{...S.td,textAlign:"right"}}>{fmtCurrency(t.plannedValue)}</td>
               <td style={S.td}><span style={{...S.badge,background:t.settled?"#16a34a":"#d97706"}}>{t.settled?"Pago":"Pendente"}</span></td>
-              <td style={S.td}>
-                {!t.settled && <button style={S.btnSm} onClick={()=>startEdit(t)} title="Editar">✏️</button>}
-                <button style={{...S.btnSm,color:"#dc2626"}} onClick={()=>setConfirmDelete(t)} title="Excluir">🗑</button>
-              </td>
             </tr>
           ))}
         </tbody>
       </table>
-
-      {/* Modal Editar */}
-      {editingTx && (
-        <div style={S.modal}>
-          <div style={S.modalBox}>
-            <h3 style={{color:"#1e3a5f",marginBottom:16}}>Editar Lançamento</h3>
-            <Field label="Descrição" value={editForm.description} onChange={v=>setEditForm(f=>({...f,description:v}))} />
-            <div style={S.fieldWrap}>
-              <label style={S.label}>Categoria</label>
-              <select style={S.input} value={editForm.categoryId} onChange={e=>setEditForm(f=>({...f,categoryId:e.target.value}))}>
-                <option value="">Selecione...</option>
-                {validCats.map(c=><option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
-              </select>
-            </div>
-            <div style={{marginTop:8}}>
-              <Field label="Data de Vencimento" type="date" value={editForm.dueDate} onChange={v=>setEditForm(f=>({...f,dueDate:v}))} />
-            </div>
-            <Field label="Valor Previsto" value={editForm.plannedValue} onChange={v=>setEditForm(f=>({...f,plannedValue:v}))} placeholder="0,00" />
-            <div style={S.btnRow}>
-              <button style={S.btnPrimary} onClick={confirmEdit} disabled={saving}>{saving?"Salvando...":"Salvar"}</button>
-              <button style={S.btnGhost} onClick={()=>setEditingTx(null)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Confirmar Exclusão */}
-      {confirmDelete && (
-        <div style={S.modal}>
-          <div style={S.modalBox}>
-            <h3 style={{color:"#dc2626",marginBottom:12}}>Confirmar Exclusão</h3>
-            <p style={{color:"#64748b",marginBottom:20}}>Deseja excluir o lançamento <strong>{confirmDelete.description}</strong> de {fmtDate(confirmDelete.dueDate)}?</p>
-            <div style={S.btnRow}>
-              <button style={{...S.btnPrimary,background:"#dc2626"}} onClick={()=>handleDelete(confirmDelete)}>Excluir</button>
-              <button style={S.btnGhost} onClick={()=>setConfirmDelete(null)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -668,41 +551,23 @@ function FinancialReport({ title, transactions, categories, env, year, setYear, 
     return transactions.filter(t=>t.env===env&&t.categoryId===catId&&monthKey(t.dueDate)===mk&&(onlySettled?t.settled:true))
       .reduce((s,t)=>s+(onlySettled?t.settledValue:t.plannedValue),0);
   };
-  // Sort ALL categories numerically and build sections dynamically
-  const sortedCats = [...categories].filter(c=>c.env==="both"||c.env===env)
-    .sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));
-  const sections = [];
-  let cur = null;
-  for(const cat of sortedCats) {
-    if(cat.type==="title") { if(cur) sections.push(cur); cur={title:cat,leaves:[]}; }
-    else { if(!cur) cur={title:null,leaves:[]}; cur.leaves.push(cat); }
-  }
-  if(cur) sections.push(cur);
-  const typeColor = {revenue:"#16a34a",expense:"#dc2626",investment:"#2563eb"};
-  // Grand totals: revenue minus expense minus investment
-  const grandByType = {};
-  sections.forEach(sec=>{
-    const tp = sec.title?.type;
-    if(!tp||tp==="title") return;
-    if(!grandByType[tp]) grandByType[tp]=months.map(()=>0);
-    sec.leaves.forEach(c=>months.forEach((m,i)=>{ grandByType[tp][i]+=getValue(c.id,m); }));
-  });
-  const totals = months.map((_,i)=>
-    (grandByType.revenue?.[i]||0)-(grandByType.expense?.[i]||0)-(grandByType.investment?.[i]||0)
-  );
+  const catGroups = [{key:"revenue",label:"RECEITAS",color:"#16a34a"},{key:"expense",label:"DESPESAS",color:"#dc2626"},{key:"investment",label:"INVESTIMENTOS",color:"#2563eb"}];
+  const sortedCats = [...categories].filter(c=>c.env==="both"||c.env===env).sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true}));
+  const titleCodeMap = {revenue:"1",expense:"2",investment:"3"};
+  const subtotals = {};
+  catGroups.forEach(g=>{ subtotals[g.key]=months.map(m=>sortedCats.filter(c=>c.type===g.key).reduce((s,c)=>s+getValue(c.id,m),0)); });
+  const totals = months.map((_,i)=>subtotals.revenue[i]-subtotals.expense[i]-subtotals.investment[i]);
 
   // Export to CSV
   const exportCSV = () => {
     const rows = [["Conta",...months.map(m=>MONTHS[m-1])]];
-    sections.forEach(sec=>{
-      if(sec.title) rows.push([`${sec.title.code} — ${sec.title.name}`,...months.map(()=>"")]);
-      sec.leaves.forEach(c=>{ rows.push([`${c.code} — ${c.name}`,...months.map(m=>fmtCurrency(getValue(c.id,m)))]); });
-      if(sec.title) {
-        const sub=months.map(m=>sec.leaves.reduce((s,c)=>s+getValue(c.id,m),0));
-        rows.push([`Subtotal — ${sec.title.name}`,...sub.map(v=>fmtCurrency(v))]);
-      }
+    catGroups.forEach(g=>{
+      const tc=sortedCats.find(c=>c.type==="title"&&c.code===titleCodeMap[g.key]);
+      if(tc) rows.push([tc.name,...months.map(()=>"")]);
+      sortedCats.filter(c=>c.type===g.key).forEach(c=>{ rows.push([`${c.code} — ${c.name}`,...months.map(m=>fmtCurrency(getValue(c.id,m)))]); });
+      rows.push([`Subtotal ${g.label}`,...subtotals[g.key].map(v=>fmtCurrency(v))]);
     });
-    rows.push(["TOTAL (REC − DESP − INV)",...totals.map(v=>fmtCurrency(v))]);
+    rows.push(["TOTAL",...totals.map(v=>fmtCurrency(v))]);
     const csv=rows.map(r=>r.map(c=>`"${c}"`).join(";")).join("\n");
     const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);
@@ -729,29 +594,25 @@ function FinancialReport({ title, transactions, categories, env, year, setYear, 
             </tr>
           </thead>
           <tbody>
-            {sections.map((sec,si)=>{
-              const color = sec.title ? (typeColor[sec.title.type]||"#2563eb") : "#2563eb";
-              const subRow = months.map(m=>sec.leaves.reduce((s,c)=>s+getValue(c.id,m),0));
+            {catGroups.map(g=>{
+              const titleCat=sortedCats.find(c=>c.type==="title"&&c.code===titleCodeMap[g.key]);
+              const leafCats=sortedCats.filter(c=>c.type===g.key);
               return [
-                sec.title && (
-                  <tr key={`title-${si}`} style={S.trGroupHeader}>
-                    <td style={{...S.td,fontWeight:800,color,fontSize:13,position:"sticky",left:0,background:"#e0f2fe"}} colSpan={13}>
-                      {sec.title.code} — {sec.title.name}
-                    </td>
+                titleCat&&(
+                  <tr key={`h-${g.key}`} style={S.trGroupHeader}>
+                    <td style={{...S.td,fontWeight:800,color:g.color,position:"sticky",left:0,background:"#e0f2fe"}} colSpan={13}>{titleCat.code} — {titleCat.name}</td>
                   </tr>
                 ),
-                ...sec.leaves.map(c=>(
+                ...leafCats.map(c=>(
                   <tr key={c.id} style={S.tr}>
-                    <td style={{...S.td,paddingLeft:28,position:"sticky",left:0,background:"#f0f9ff"}}>{c.code} — {c.name}</td>
+                    <td style={{...S.td,paddingLeft:24,position:"sticky",left:0,background:"#f0f9ff"}}>{c.code} — {c.name}</td>
                     {months.map(m=>{ const v=getValue(c.id,m); return <td key={m} style={{...S.td,textAlign:"right",color:v===0?"#cbd5e1":"#1e3a5f"}}>{fmtCurrency(v)}</td>; })}
                   </tr>
                 )),
-                sec.title && (
-                  <tr key={`sub-${si}`} style={S.trSubtotal}>
-                    <td style={{...S.td,fontWeight:700,color,position:"sticky",left:0,background:"#dbeafe"}}>Subtotal — {sec.title.name}</td>
-                    {subRow.map((v,i)=><td key={i} style={{...S.td,textAlign:"right",fontWeight:700,color}}>{fmtCurrency(v)}</td>)}
-                  </tr>
-                ),
+                <tr key={`sub-${g.key}`} style={S.trSubtotal}>
+                  <td style={{...S.td,fontWeight:700,color:g.color,position:"sticky",left:0,background:"#dbeafe"}}>Subtotal {g.label}</td>
+                  {subtotals[g.key].map((v,i)=><td key={i} style={{...S.td,textAlign:"right",fontWeight:700,color:g.color}}>{fmtCurrency(v)}</td>)}
+                </tr>
               ];
             })}
             <tr style={S.trTotal}>
@@ -953,8 +814,8 @@ const S = {
   logoIcon: { fontSize:28 },
   logoTitle: { fontSize:17, fontWeight:800, color:"#1e3a5f", letterSpacing:-0.3 },
   logoSub: { fontSize:11, color:"#64748b", letterSpacing:0.3 },
-  envToggle: { display:"flex", gap:4 },
-  envBtn: { background:"#f0f9ff", border:"1px solid #bfdbfe", color:"#3b82f6", padding:"6px 10px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", maxWidth:120 },
+  envToggle: { display:"flex", gap:6 },
+  envBtn: { background:"#f0f9ff", border:"1px solid #bfdbfe", color:"#3b82f6", padding:"6px 14px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600 },
   envBtnActive: { background:"#2563eb", border:"1px solid #2563eb", color:"#fff" },
   btnLogout: { background:"transparent", border:"1px solid #bfdbfe", color:"#64748b", padding:"6px 14px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600 },
   alertBell: { position:"relative", fontSize:20, cursor:"pointer" },
