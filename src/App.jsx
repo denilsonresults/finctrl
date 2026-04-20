@@ -36,7 +36,7 @@ const db = {
 };
 
 // ─── Auth (senha local simples) ────────────────────────────────────────────
-const APP_PASSWORD = "cgf2025"; // ← altere aqui se quiser mudar a senha
+const APP_PASSWORD = "241441";
 const isAuthed = () => sessionStorage.getItem("cgf_auth") === "ok";
 const setAuthed = () => sessionStorage.setItem("cgf_auth", "ok");
 const clearAuthed = () => sessionStorage.removeItem("cgf_auth");
@@ -637,12 +637,14 @@ function Settle({ transactions, setTransactions, categories, env, showToast }) {
     setSaving(false);
   };
 
+  const [confirmCancel, setConfirmCancel] = useState(null);
+
   const cancelSettle = async (t) => {
-    if(!window.confirm(`Desfazer baixa de "${t.description}"?`)) return;
     try {
       await db.updateTransaction(t.id,{settled:false,settled_date:null,settled_value:0});
       setTransactions(ts=>ts.map(x=>x.id===t.id?{...x,settled:false,settledDate:null,settledValue:0}:x));
       showToast("Baixa desfeita.");
+      setConfirmCancel(null);
     } catch(e) { showToast("Erro: "+e.message,"error"); }
   };
 
@@ -691,12 +693,26 @@ function Settle({ transactions, setTransactions, categories, env, showToast }) {
                 <td style={S.td}>{fmtDate(t.settledDate)}</td>
                 <td style={S.td}>
                   <button style={S.btnSm} onClick={()=>openEditPaid(t)} title="Editar valor pago">✏️</button>
-                  <button style={{...S.btnSm,color:"#f59e0b",marginLeft:4}} onClick={()=>cancelSettle(t)} title="Desfazer baixa">↩️</button>
+                  <button style={{...S.btnSm,color:"#f59e0b",marginLeft:4}} onClick={()=>setConfirmCancel(t)} title="Desfazer baixa">↩️</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {/* Modal Desfazer Baixa */}
+      {confirmCancel && (
+        <div style={S.modal}>
+          <div style={S.modalBox}>
+            <h3 style={{color:"#d97706",marginBottom:12}}>↩️ Desfazer Baixa</h3>
+            <p style={{color:"#64748b",marginBottom:20}}>Deseja desfazer a baixa de <strong>{confirmCancel.description}</strong>?</p>
+            <div style={S.btnRow}>
+              <button style={{...S.btnPrimary,background:"#d97706"}} onClick={()=>cancelSettle(confirmCancel)}>Confirmar</button>
+              <button style={S.btnGhost} onClick={()=>setConfirmCancel(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal Dar Baixa / Editar Baixa */}
@@ -743,13 +759,13 @@ function FinancialReport({ title, transactions, categories, env, year, setYear, 
   const getValue = (catId,monthIdx) => {
     const mk=`${year}-${String(monthIdx).padStart(2,"0")}`;
     if(onlySettled) {
-      // DRE: usa a data em que foi PAGO (settledDate), não o vencimento
-      return transactions.filter(t=>
-        t.env===env && t.categoryId===catId && t.settled &&
-        monthKey(t.settledDate||t.dueDate)===mk
-      ).reduce((s,t)=>s+t.settledValue,0);
+      // DRE: usa settledDate se disponível, senão usa dueDate
+      return transactions.filter(t=>{
+        if(t.env!==env || t.categoryId!==catId || !t.settled) return false;
+        const refDate = (t.settledDate && t.settledDate.length>=7) ? t.settledDate : t.dueDate;
+        return monthKey(refDate)===mk;
+      }).reduce((s,t)=>s+t.settledValue,0);
     } else {
-      // Fluxo de Caixa: usa data de vencimento (planejado)
       return transactions.filter(t=>
         t.env===env && t.categoryId===catId && monthKey(t.dueDate)===mk
       ).reduce((s,t)=>s+t.plannedValue,0);
