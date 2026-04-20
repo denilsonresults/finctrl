@@ -764,16 +764,15 @@ function FinancialReport({ title, transactions, categories, env, year, setYear, 
   const getValue = (catId,monthIdx) => {
     const mk=`${year}-${String(monthIdx).padStart(2,"0")}`;
     if(onlySettled) {
-      // DRE: usa settledDate se disponível, senão usa dueDate
-      return transactions.filter(t=>{
-        if(t.env!==env || t.categoryId!==catId || !t.settled) return false;
-        const refDate = (t.settledDate && t.settledDate.length>=7) ? t.settledDate : t.dueDate;
-        return monthKey(refDate)===mk;
-      }).reduce((s,t)=>s+t.settledValue,0);
+      // DRE: apenas pagos, agrupados pelo mês de VENCIMENTO (regime de competência)
+      return transactions
+        .filter(t=>t.env===env && t.categoryId===catId && t.settled && monthKey(t.dueDate)===mk)
+        .reduce((s,t)=>s+t.settledValue, 0);
     } else {
-      return transactions.filter(t=>
-        t.env===env && t.categoryId===catId && monthKey(t.dueDate)===mk
-      ).reduce((s,t)=>s+t.plannedValue,0);
+      // Fluxo de Caixa: todos (pagos e pendentes), pelo mês de vencimento
+      return transactions
+        .filter(t=>t.env===env && t.categoryId===catId && monthKey(t.dueDate)===mk)
+        .reduce((s,t)=>s+(t.settled ? t.settledValue : t.plannedValue), 0);
     }
   };
   // Sort ALL categories numerically and build sections dynamically
