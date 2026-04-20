@@ -113,7 +113,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
-  const showToast = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+  // Ping automático — mantém o Supabase ativo (evita pause após 7 dias sem uso)
+  useEffect(() => {
+    const ping = () => fetch(`${SUPABASE_URL}/rest/v1/categories?limit=1`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    }).catch(()=>{});
+    ping(); // ping imediato ao abrir
+    const interval = setInterval(ping, 1000 * 60 * 60 * 24 * 3); // a cada 3 dias
+    return () => clearInterval(interval);
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -576,9 +584,25 @@ function Launch({ categories, transactions, setTransactions, env, showToast }) {
 function Settle({ transactions, setTransactions, categories, env, showToast }) {
   const [month, setMonth] = useState(nowISO().slice(0,7));
   const [editing, setEditing] = useState(null);
+  const [editMode, setEditMode] = useState("settle"); // "settle" | "edit"
   const [settleForm, setSettleForm] = useState({settledDate:nowISO(),settledValue:"",updateFuture:false});
   const [saving, setSaving] = useState(false);
-  const pending = transactions.filter(t=>t.env===env&&!t.settled&&monthKey(t.dueDate)===month).sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+
+  const txMonth = transactions.filter(t=>t.env===env&&monthKey(t.dueDate)===month).sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  const pending = txMonth.filter(t=>!t.settled);
+  const paid = txMonth.filter(t=>t.settled);
+
+  const openSettle = (t) => {
+    setEditMode("settle");
+    setEditing(t);
+    setSettleForm({settledDate:nowISO(),settledValue:fmtCurrency(t.plannedValue),updateFuture:false});
+  };
+
+  const openEditPaid = (t) => {
+    setEditMode("edit");
+    setEditing(t);
+    setSettleForm({settledDate:t.settledDate||nowISO(),settledValue:fmtCurrency(t.settledValue),updateFuture:false});
+  };
 
   const confirmSettle = async () => {
     setSaving(true);
@@ -597,9 +621,29 @@ function Settle({ transactions, setTransactions, categories, env, showToast }) {
           }
         }
       }
-      showToast("Baixa efetuada!");setEditing(null);
-    } catch { showToast("Erro ao dar baixa.","error"); }
+      showToast("Baixa efetuada!"); setEditing(null);
+    } catch(e) { showToast("Erro: "+e.message,"error"); }
     setSaving(false);
+  };
+
+  const confirmEditPaid = async () => {
+    setSaving(true);
+    try {
+      const val = parseCurrency(settleForm.settledValue);
+      await db.updateTransaction(editing.id,{settled_date:settleForm.settledDate,settled_value:val});
+      setTransactions(ts=>ts.map(t=>t.id===editing.id?{...t,settledDate:settleForm.settledDate,settledValue:val}:t));
+      showToast("Baixa atualizada!"); setEditing(null);
+    } catch(e) { showToast("Erro: "+e.message,"error"); }
+    setSaving(false);
+  };
+
+  const cancelSettle = async (t) => {
+    if(!window.confirm(`Desfazer baixa de "${t.description}"?`)) return;
+    try {
+      await db.updateTransaction(t.id,{settled:false,settled_date:null,settled_value:0});
+      setTransactions(ts=>ts.map(x=>x.id===t.id?{...x,settled:false,settledDate:null,settledValue:0}:x));
+      showToast("Baixa desfeita.");
+    } catch(e) { showToast("Erro: "+e.message,"error"); }
   };
 
   return (
@@ -611,7 +655,10 @@ function Settle({ transactions, setTransactions, categories, env, showToast }) {
           <input type="month" style={S.input} value={month} onChange={e=>setMonth(e.target.value)} />
         </div>
       </div>
-      {pending.length===0?<p style={S.empty}>Nenhum lançamento pendente neste mês.</p>:(
+
+      {/* Pendentes */}
+      <h3 style={S.sectionTitle}>⏳ Pendentes ({pending.length})</h3>
+      {pending.length===0 ? <p style={S.empty}>Nenhum lançamento pendente neste mês.</p> : (
         <table style={S.table}>
           <thead><tr><th style={S.th}>Vencimento</th><th style={S.th}>Descrição</th><th style={S.th}>Categoria</th><th style={S.th}>Valor Prev.</th><th style={S.th}>Ação</th></tr></thead>
           <tbody>
@@ -621,27 +668,57 @@ function Settle({ transactions, setTransactions, categories, env, showToast }) {
                 <td style={S.td}>{t.description}</td>
                 <td style={S.td}>{getCatName(t.categoryId,categories)}</td>
                 <td style={{...S.td,textAlign:"right"}}>{fmtCurrency(t.plannedValue)}</td>
-                <td style={S.td}><button style={S.btnPrimary} onClick={()=>{setEditing(t);setSettleForm({settledDate:nowISO(),settledValue:fmtCurrency(t.plannedValue),updateFuture:false});}}>Dar Baixa</button></td>
+                <td style={S.td}><button style={S.btnPrimary} onClick={()=>openSettle(t)}>Dar Baixa</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {editing&&(
+
+      {/* Pagos */}
+      <h3 style={{...S.sectionTitle,marginTop:24}}>✅ Pagos ({paid.length})</h3>
+      {paid.length===0 ? <p style={S.empty}>Nenhum lançamento pago neste mês.</p> : (
+        <table style={S.table}>
+          <thead><tr><th style={S.th}>Vencimento</th><th style={S.th}>Descrição</th><th style={S.th}>Categoria</th><th style={S.th}>Valor Prev.</th><th style={S.th}>Valor Pago</th><th style={S.th}>Dt. Pagto</th><th style={S.th}>Ações</th></tr></thead>
+          <tbody>
+            {paid.map(t=>(
+              <tr key={t.id} style={S.tr}>
+                <td style={S.td}>{fmtDate(t.dueDate)}</td>
+                <td style={S.td}>{t.description}</td>
+                <td style={S.td}>{getCatName(t.categoryId,categories)}</td>
+                <td style={{...S.td,textAlign:"right",color:"#94a3b8"}}>{fmtCurrency(t.plannedValue)}</td>
+                <td style={{...S.td,textAlign:"right",fontWeight:700,color:"#16a34a"}}>{fmtCurrency(t.settledValue)}</td>
+                <td style={S.td}>{fmtDate(t.settledDate)}</td>
+                <td style={S.td}>
+                  <button style={S.btnSm} onClick={()=>openEditPaid(t)} title="Editar valor pago">✏️</button>
+                  <button style={{...S.btnSm,color:"#f59e0b",marginLeft:4}} onClick={()=>cancelSettle(t)} title="Desfazer baixa">↩️</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Modal Dar Baixa / Editar Baixa */}
+      {editing && (
         <div style={S.modal}>
           <div style={S.modalBox}>
-            <h3 style={{color:"#1e3a5f",marginBottom:12}}>Confirmar Baixa</h3>
+            <h3 style={{color:"#1e3a5f",marginBottom:12}}>
+              {editMode==="edit" ? "✏️ Editar Valor Pago" : "Confirmar Baixa"}
+            </h3>
             <p style={{color:"#64748b",marginBottom:16}}>{editing.description} — Venc. {fmtDate(editing.dueDate)}</p>
             <Field label="Data do Pagamento" type="date" value={settleForm.settledDate} onChange={v=>setSettleForm(f=>({...f,settledDate:v}))} />
             <Field label="Valor Pago" value={settleForm.settledValue} onChange={v=>setSettleForm(f=>({...f,settledValue:v}))} placeholder="0,00" />
-            {editing.recurGroup&&(
+            {editMode==="settle" && editing.recurGroup && (
               <div style={{...S.checkRow,marginTop:12}}>
                 <input type="checkbox" id="uf" checked={settleForm.updateFuture} onChange={e=>setSettleForm(f=>({...f,updateFuture:e.target.checked}))} />
                 <label htmlFor="uf" style={S.checkLabel}>Atualizar meses seguintes com a diferença?</label>
               </div>
             )}
             <div style={S.btnRow}>
-              <button style={S.btnPrimary} onClick={confirmSettle} disabled={saving}>{saving?"Salvando...":"Confirmar"}</button>
+              <button style={S.btnPrimary} onClick={editMode==="edit"?confirmEditPaid:confirmSettle} disabled={saving}>
+                {saving?"Salvando...":"Salvar"}
+              </button>
               <button style={S.btnGhost} onClick={()=>setEditing(null)}>Cancelar</button>
             </div>
           </div>
@@ -665,8 +742,18 @@ function FinancialReport({ title, transactions, categories, env, year, setYear, 
   const months = Array.from({length:12},(_,i)=>i+1);
   const getValue = (catId,monthIdx) => {
     const mk=`${year}-${String(monthIdx).padStart(2,"0")}`;
-    return transactions.filter(t=>t.env===env&&t.categoryId===catId&&monthKey(t.dueDate)===mk&&(onlySettled?t.settled:true))
-      .reduce((s,t)=>s+(onlySettled?t.settledValue:t.plannedValue),0);
+    if(onlySettled) {
+      // DRE: usa a data em que foi PAGO (settledDate), não o vencimento
+      return transactions.filter(t=>
+        t.env===env && t.categoryId===catId && t.settled &&
+        monthKey(t.settledDate||t.dueDate)===mk
+      ).reduce((s,t)=>s+t.settledValue,0);
+    } else {
+      // Fluxo de Caixa: usa data de vencimento (planejado)
+      return transactions.filter(t=>
+        t.env===env && t.categoryId===catId && monthKey(t.dueDate)===mk
+      ).reduce((s,t)=>s+t.plannedValue,0);
+    }
   };
   // Sort ALL categories numerically and build sections dynamically
   const sortedCats = [...categories].filter(c=>c.env==="both"||c.env===env)
