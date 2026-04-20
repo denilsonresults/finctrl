@@ -85,6 +85,19 @@ function LoginScreen({ onLogin }) {
 
 // ─── App Root ──────────────────────────────────────────────────────────────
 export default function App() {
+  const [authed, setAuthedState] = useState(isAuthed());
+  const [env, setEnv] = useState("casa");
+  const [screen, setScreen] = useState("dashboard");
+  const [categories, setCategories] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [creditAnalyses, setCreditAnalyses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+
+  const showToast = useCallback((msg, type="success") => {
+    setToast({msg,type}); setTimeout(()=>setToast(null),3500);
+  }, []);
+
   // Inject responsive CSS once
   useEffect(() => {
     const id = "cgf-responsive";
@@ -104,22 +117,14 @@ export default function App() {
       document.head.appendChild(s);
     }
   }, []);
-  const [authed, setAuthedState] = useState(isAuthed());
-  const [env, setEnv] = useState("casa");
-  const [screen, setScreen] = useState("dashboard");
-  const [categories, setCategories] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [creditAnalyses, setCreditAnalyses] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
 
   // Ping automático — mantém o Supabase ativo (evita pause após 7 dias sem uso)
   useEffect(() => {
     const ping = () => fetch(`${SUPABASE_URL}/rest/v1/categories?limit=1`, {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
     }).catch(()=>{});
-    ping(); // ping imediato ao abrir
-    const interval = setInterval(ping, 1000 * 60 * 60 * 24 * 3); // a cada 3 dias
+    ping();
+    const interval = setInterval(ping, 1000 * 60 * 60 * 24 * 3);
     return () => clearInterval(interval);
   }, []);
 
@@ -130,7 +135,7 @@ export default function App() {
       setCategories(cats.map(mapCat));
       setTransactions(txs.map(mapTx));
       setCreditAnalyses(analyses.map(mapAnalysis));
-    } catch { showToast("Erro ao carregar dados.","error"); }
+    } catch(e) { setToast({msg:"Erro ao carregar dados: "+e.message,type:"error"}); setTimeout(()=>setToast(null),3500); }
     setLoading(false);
   },[]);
 
