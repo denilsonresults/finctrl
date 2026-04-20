@@ -36,7 +36,7 @@ const db = {
 };
 
 // ─── Auth (senha local simples) ────────────────────────────────────────────
-const APP_PASSWORD = "241441"; // ← altere aqui se quiser mudar a senha
+const APP_PASSWORD = "cgf2025"; // ← altere aqui se quiser mudar a senha
 const isAuthed = () => sessionStorage.getItem("cgf_auth") === "ok";
 const setAuthed = () => sessionStorage.setItem("cgf_auth", "ok");
 const clearAuthed = () => sessionStorage.removeItem("cgf_auth");
